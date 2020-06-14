@@ -21,7 +21,7 @@ prepare:
 	# @echo "PREPARE: Setting up dependencies."
 	# @apt update -y
 	# @apt install --only-upgrade docker-ce -y
-	
+
 	## Update docker configuration to enable docker manifest command
 	@echo "PREPARE: Updating docker configuration"
 	@mkdir -p $$HOME/.docker
@@ -29,7 +29,7 @@ prepare:
 	# enable experimental to use docker manifest command
 	@echo '{ "experimental": "enabled" }' | tee $$HOME/.docker/config.json
 	# enable experimental
-	@echo '{ "experimental": true, "storage-driver": "overlay2", "max-concurrent-downloads": 50, "max-concurrent-uploads": 50 }' | tee /etc/docker/daemon.json 
+	@echo '{ "experimental": true, "storage-driver": "overlay2", "max-concurrent-downloads": 50, "max-concurrent-uploads": 50 }' | tee /etc/docker/daemon.json
 	@service docker restart
 
 .PHONY: build
@@ -45,14 +45,14 @@ build:
 	@echo "DOCKER BUILD: emqx version - $(EMQX_DEPS_DEFAULT_VSN)."
 
 	## Prepare qemu to build images other then x86_64 on travis
-	@echo "PREPARE: Qemu" \
-	&& docker run --rm --privileged multiarch/qemu-user-static:register --reset
-  
-	@mkdir -p tmp \
-	&& cd tmp \
-	&& curl -L -o qemu-$(QEMU_ARCH)-static.tar.gz https://github.com/multiarch/qemu-user-static/releases/download/$(QEMU_VERSION)/qemu-$(QEMU_ARCH)-static.tar.gz \
-	&& tar xzf qemu-$(QEMU_ARCH)-static.tar.gz \
-	&& cd -
+	# @echo "PREPARE: Qemu" \
+	# && docker run --rm --privileged multiarch/qemu-user-static:register --reset
+
+	# @mkdir -p tmp \
+	# && cd tmp \
+	# && curl -L -o qemu-$(QEMU_ARCH)-static.tar.gz https://github.com/multiarch/qemu-user-static/releases/download/$(QEMU_VERSION)/qemu-$(QEMU_ARCH)-static.tar.gz \
+	# && tar xzf qemu-$(QEMU_ARCH)-static.tar.gz \
+	# && cd -
 
 	@cd ../.. \
 	&& docker build --no-cache \
@@ -81,7 +81,7 @@ tag:
 
 .PHONY: save
 save:
-	@echo "DOCKER SAVE: Save Docker image." 
+	@echo "DOCKER SAVE: Save Docker image."
 
 	@mkdir -p ../../_packages/$(EMQX_NAME)
 
@@ -91,7 +91,7 @@ save:
 		mkdir -p ../../_packages/$(EMQX_NAME); \
 		mv ./$(EMQX_NAME)-docker-$(BUILD_VERSION).zip ../../_packages/$(EMQX_NAME)/$(EMQX_NAME)-docker-$(BUILD_VERSION).zip; \
 	fi
-	
+
 	@for arch in $(ARCH_LIST); do \
 		if [ -n  "$$(docker images -q  $(TARGET):$(BUILD_VERSION)-$(OS)-$${arch})" ]; then \
 			docker save  $(TARGET):$(BUILD_VERSION)-$(OS)-$${arch} > $(EMQX_NAME)-docker-$(BUILD_VERSION)-$(OS)-$${arch}; \
@@ -103,8 +103,8 @@ save:
 
 .PHONY: push
 push:
-	@echo "DOCKER PUSH: Push Docker image."; 
-	@echo "DOCKER PUSH: pushing - $(TARGET):$(BUILD_VERSION)."; 
+	@echo "DOCKER PUSH: Push Docker image.";
+	@echo "DOCKER PUSH: pushing - $(TARGET):$(BUILD_VERSION).";
 
 	@if [ -n "$$(docker images -q $(TARGET):$(BUILD_VERSION))" ]; then \
 		docker push $(TARGET):$(BUILD_VERSION); \
@@ -129,7 +129,7 @@ manifest_list:
 		fi; \
 	done; \
 	eval $$version; \
-	eval $$latest; 
+	eval $$latest;
 
 	for arch in $(ARCH_LIST); do \
 		case $${arch} in \
@@ -164,10 +164,10 @@ manifest_list:
 				fi; \
 				;; \
 		esac; \
-	done; 
+	done;
 
 	docker manifest inspect $(TARGET):$(BUILD_VERSION)
-	docker manifest push $(TARGET):$(BUILD_VERSION); 
+	docker manifest push $(TARGET):$(BUILD_VERSION);
 	docker manifest inspect $(TARGET):latest
 	docker manifest push $(TARGET):latest;
 

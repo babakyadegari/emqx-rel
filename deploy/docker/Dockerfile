@@ -1,58 +1,92 @@
-ARG BUILD_FROM=erlang:22.1-alpine 
+ARG BUILD_FROM=alpine:3.10
 ARG RUN_FROM=alpine:3.10
-FROM ${BUILD_FROM} AS builder
 
-ARG QEMU_ARCH=x86_64
-COPY deploy/docker/tmp/qemu-$QEMU_ARCH-stati* /usr/bin/
-COPY . /emqx_rel 
+FROM ${BUILD_FROM} AS cass-cpp
+LABEL builder=true
+#ENV CPP_DIR /cpp-driver
 
 RUN apk add git \
     curl \
     gcc \
+    g++ \
     make \
     perl \
     ncurses-dev \
     openssl-dev \
     coreutils \
     bsd-compat-headers \
-    libc-dev 
+    libuv-dev \
+    zlib \
+    cmake
 
+RUN mkdir -p cpp-driver \
+  && git clone https://github.com/datastax/cpp-driver.git cpp-driver \
+  && cd cpp-driver \
+  && git checkout 3a5d3a50299fafc9c02c2dd42447e617593a19e9
+
+WORKDIR cpp-driver/build
+
+RUN cmake .. -DCASS_BUILD_STATIC=ON -DCASS_BUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=RELEASE -DCMAKE_CXX_FLAGS=-fPIC -DCMAKE_C_FLAGS=-fPIC \
+  && make -j 4
+
+RUN rm -rf cpp-driver/.git
+
+
+
+FROM erlang:22.1-alpine as emqx-base
+
+RUN apk add git \
+    curl \
+    gcc \
+    g++ \
+    make \
+    ncurses-dev \
+    openssl-dev \
+    coreutils \
+    bsd-compat-headers \
+    bash \
+    libuv-dev \
+    zlib \
+    libc-dev \
+    sed
+
+
+#COPY . /emqx_rel
+
+RUN mkdir -p /emqx-rel
+RUN git clone https://github.com/emqx/emqx-rel.git /emqx-rel
 ARG EMQX_DEPS_DEFAULT_VSN=develop
 ARG EMQX_NAME=emqx
 
-RUN cd /emqx_rel && make ${EMQX_NAME}
+RUN cd /emqx-rel && make
 
-FROM $RUN_FROM
+#BUILD ERLCASS STUFF
+RUN git clone --branch 'v4.0.0' https://github.com/silviucpp/erlcass.git /erlcass
+WORKDIR /erlcass
 
-# Basic build-time metadata as defined at http://label-schema.org
-LABEL org.label-schema.docker.dockerfile="Dockerfile" \
-    org.label-schema.license="GNU" \
-    org.label-schema.name="emqx" \
-    org.label-schema.version=${EMQX_DEPS_DEFAULT_VSN} \
-    org.label-schema.description="EMQ (Erlang MQTT Broker) is a distributed, massively scalable, highly extensible MQTT messaging broker written in Erlang/OTP." \
-    org.label-schema.url="http://emqx.io" \
-    org.label-schema.vcs-type="Git" \
-    org.label-schema.vcs-url="https://github.com/emqx/emqx-docker" \
-    maintainer="Raymond M Mouthaan <raymondmmouthaan@gmail.com>, Huang Rui <vowstar@gmail.com>, EMQ X Team <support@emqx.io>"
+RUN echo '{base_dir, "/emqx-rel/_build"}.' >> rebar.config
 
-ARG QEMU_ARCH=x86_64
-COPY deploy/docker/docker-entrypoint.sh deploy/docker/start.sh deploy/docker/tmp/qemu-$QEMU_ARCH-stati* /usr/bin/
-COPY --from=builder /emqx_rel/_build/emqx*/rel/emqx /opt/emqx
+COPY --from=cass-cpp /cpp-driver /erlcass/_build/deps/cpp-driver
 
-RUN ln -s /opt/emqx/bin/* /usr/local/bin/ 
-RUN apk add --no-cache ncurses-libs openssl sudo
+RUN rebar3 as emqx compile
 
-WORKDIR /opt/emqx
+#COPY deploy/docker/docker-entrypoint.sh deploy/docker/start.sh /usr/bin/
+#COPY --from=builder //_build/emqx*/rel/emqx /opt/emqx
 
-RUN adduser -D -u 1000 emqx \
-    && echo "emqx ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers
+#RUN ln -s /opt/emqx/bin/* /usr/local/bin/
+#RUN apk add --no-cache ncurses-libs openssl sudo
 
-RUN chgrp -Rf emqx /opt/emqx && chmod -Rf g+w /opt/emqx \
-      && chown -Rf emqx /opt/emqx
+#WORKDIR /opt/emqx
 
-USER emqx
+#RUN adduser -D -u 1000 emqx \
+#    && echo "emqx ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers
 
-VOLUME ["/opt/emqx/log", "/opt/emqx/data", "/opt/emqx/lib", "/opt/emqx/etc"]
+#RUN chgrp -Rf emqx /opt/emqx && chmod -Rf g+w /opt/emqx \
+#      && chown -Rf emqx /opt/emqx
+
+#USER emqx
+
+#VOLUME ["/opt/emqx/log", "/opt/emqx/data", "/opt/emqx/lib", "/opt/emqx/etc"]
 
 # emqx will occupy these port:
 # - 1883 port for MQTT
@@ -67,6 +101,56 @@ VOLUME ["/opt/emqx/log", "/opt/emqx/data", "/opt/emqx/lib", "/opt/emqx/etc"]
 # - 6369 for distributed node
 EXPOSE 1883 8080 8083 8084 8883 11883 18083 4369 5369 6369
 
-ENTRYPOINT ["/usr/bin/docker-entrypoint.sh"]
+#ENTRYPOINT ["/usr/bin/docker-entrypoint.sh"]
+#CMD ["/usr/bin/start.sh"]
 
-CMD ["/usr/bin/start.sh"]
+FROM erlang:22.1-alpine as emqx-cass-dev
+VOLUME ["/emqx_cassandra_backend"]
+COPY --from=emqx-base /emqx-rel /emqx-rel
+COPY --from=emqx-base /erlcass /emqx-rel/_build/default/lib/erlcass/
+#COPY --from=emqx-base /erlcass/_build/deps/ /emqx-rel/_build/default/lib/deps/erlcass/_build/deps
+
+RUN apk add git \
+    curl \
+    gcc \
+    g++ \
+    make \
+    bsd-compat-headers \
+    zlib \
+    libuv-dev \
+    zlib \
+    libc-dev \
+    bash
+
+ENTRYPOINT ["/emqx_cassandra_backend/build.sh"]
+
+CMD ["tail", "-f", "/dev/null"]
+
+
+FORM cassandra:3.10 AS cassandra-base
+
+RUN mkdir -p /opt/data/
+
+COPY ./schema/db_schema.sql /opt/data/db_schema.sql
+
+COPY ./schema/seed_db.sh seed_db.sh
+
+RUN chmod +x seed_db.sh
+
+VOLUME ["/var/lib/cassandra"]
+
+ENTRYPOINT ["seed_db.sh"]
+
+
+
+FROM node:11 as webservices-dev
+
+WORKDIR /srv/app/WebServices
+
+COPY ./WebServices .
+
+RUN npm install
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]
